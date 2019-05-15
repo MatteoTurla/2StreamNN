@@ -31,10 +31,9 @@ class TwoStreamNN(torch.nn.Module):
         return out
 
     def extract_feature(self, X_stgcn, X_i3d):
-        #stgcn work every 4 frames while i3d works every 8 frames
-        #quindi i risultati devono essere allineati
-        feature_stgcn, _ = self.stgcn.extract_feature(X_stgcn)
-        feature_i3d = self.I3D.extract_feature(X_i3d)       
+        with torch.no_grad():
+            feature_stgcn, _ = self.stgcn.extract_feature(X_stgcn)
+            feature_i3d = self.I3D.extract_feature(X_i3d)       
                 
         return feature_stgcn, feature_i3d
 

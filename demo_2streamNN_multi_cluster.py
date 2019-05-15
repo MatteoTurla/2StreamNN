@@ -17,29 +17,14 @@ from i3d.i3dpt import I3D
 from stgcn.st_gcn import Model
 from TwoStreamNN import TwoStreamNN
 
-#per ora funziona quando c'è solo una persona, video può essere lungo a piacere, non sono presenti classi di rigetto
-#quindi anche se non si fa nulla il sitema darà in otput qualche azione
 class Demo():
-    def __init__(self, cluster, demo_dir_folder, video_name, output_name, modality, debug=True, openpose=True):
+    def __init__(self, demo_dir_folder, video_name, output_name, modality, debug=True):
         since = time.time()
-        self.cluster = cluster
         self.demo_dir_folder = demo_dir_folder
         self.video_name = video_name
         self.output_name = output_name
         self.modality = modality
 
-        if cluster == 'basic':
-            num_classes = 4
-            offset = 0
-        elif cluster == 'alerting':
-            num_classes = 8
-            offset = 4
-        elif cluster == 'daily_life':
-            num_classes = 7
-            offset = 4+8
-        else:
-            raise Exception('cluster errato: {alerting, basic or daily_life}')
-        
         if self.modality != 'i3d' and self.modality != 'stgcn' and self.modality != '2streamNN':
             raise Exception('modality errata: {i3d, stgcn or 2streamNN}')
 
@@ -49,8 +34,12 @@ class Demo():
         #COSTANTI DELLA DEMO BASATE SUL MODELLO UTILIZZATO
         downsample_i3d = 2
         downsample_stgcn = 1
-        model_weight_stgcn = 'stgcn/best_model/{}.pt'.format(cluster)
-        model_weight_i3d = 'i3d/best_model/{}.pt'.format(cluster)
+        model_weight_stgcn_basic = 'stgcn/best_model/{}.pt'.format('basic')
+        model_weight_i3d_basic = 'i3d/best_model/{}.pt'.format('basic')
+        model_weight_stgcn_alerting = 'stgcn/best_model/{}.pt'.format('alerting')
+        model_weight_i3d_alerting = 'i3d/best_model/{}.pt'.format('alerting')
+        model_weight_stgcn_daily_life = 'stgcn/best_model/{}.pt'.format('daily_life')
+        model_weight_i3d_daily_life = 'i3d/best_model/{}.pt'.format('daily_life')
         label_name_path = '../Dataset/label_name.txt'
         with open(label_name_path) as f:
             label_name = f.readlines()
@@ -60,20 +49,14 @@ class Demo():
         video_path = os.path.join(demo_dir_folder, video_name)
         output_path = os.path.join(demo_dir_folder, output_name)
  
-        if openpose:
-            openpose_folder = self._openpose()
-        else:
-            openpose_folder = os.path.join(self.demo_dir_folder, 'openpose')
-        
+        openpose_folder = self._openpose() #os.path.join(self.demo_dir_folder, 'openpose') #
+
         self.video = stgcn_tools.video.get_video_frames(video_path)
         video_height, video_width, video_channel = self.video[0].shape
-        video_len = len(self.video)
-
         print("generating pose")
         video_info = stgcn_tools.openpose.json_pack(openpose_folder, frame_width=video_width, frame_height=video_height)
         pose, _ = stgcn_tools.video.video_info_parsing(video_info, num_person_out=1)
         pose_tensor = torch.from_numpy(pose).float()
-
         x_1,y_1, x_2, y_2 = 1, 1, 0, 0
         pose_x = pose_tensor.view(3, -1)[0]
         pose_y = pose_tensor.view(3, -1)[1]
@@ -96,28 +79,59 @@ class Demo():
 
         pose_tensor = pose_tensor[:,::downsample_stgcn,:,:].unsqueeze(0)
 
-        print("\ngenerating i3d video")
+        
 
-        video_tensor = i3d_tools.utils.transform_video_crop(self.video, points)
+        print("\ngenerating video")
+        video_tensor = i3d_tools.utils.transform_video(self.video, points)
         if debug:
-            i3d_tools.utils.save_transform_crop(self.video, points, os.path.join(self.demo_dir_folder, 'i3d_vis.mp4'))
+            i3d_tools.utils.save_transform(self.video, points, os.path.join(self.demo_dir_folder, 'i3d_vis.mp4'))
         video_tensor = video_tensor[:,::downsample_i3d,:,:].unsqueeze(0)
 
+        start = 0
+        end = 160
+        
+        output_name = []
+        output_prob = []
+        while end < len(self.video):
+            pose_tmp = pose_tensor[:,:,start:end,:,:]
+            video_tmp = video_tensor[:,:,start:end,:,:]
+        
+            print("Video:", len(self.video))
+            print("Pose:", pose_tmp.shape)
+            print("I3D video:", video_tmp.shape)
 
-        print("Video:", len(self.video))
-        print("Pose:", pose_tensor.shape)
-        print("I3D video:", video_tensor.shape)
+            model_2stream_basic = self._loadingModels(model_weight_stgcn_basic, model_weight_i3d_basic, 4)
+            model_2stream_alerting = self._loadingModels(model_weight_stgcn_alerting, model_weight_i3d_alerting, 8)
+            model_2stream_daily_life = self._loadingModels(model_weight_stgcn_daily_life, model_weight_i3d_daily_life, 7)
 
-        model_2stream = self._loadingModels(model_weight_stgcn, model_weight_i3d, num_classes)
-        print('\nExtracting Features...')
-        label_prob_s, label_name_s = self._extractFeature(model_2stream, pose_tensor, video_tensor)
+            print('\nExtracting Features...')
+            out_basic = self._extractFeature(model_2stream_basic, pose_tmp, video_tmp, cluster='basic')
+            out_alerting = self._extractFeature(model_2stream_alerting, pose_tmp, video_tmp, cluster='alerting')
+            out_daily_life = self._extractFeature(model_2stream_daily_life, pose_tmp, video_tmp, cluster='daily_life')
 
-        labels_name = [[label_name[p+offset] for p in l ]for l in label_name_s]
-        labels_prob = [[p for p in l ]for l in label_prob_s]
-        print('Done.')
+            out = torch.cat((out_basic, out_alerting, out_daily_life), 0)
 
+            label_prob, label_name_s = out.max(dim=0)
+            label_prob, label_name_s = label_prob.unsqueeze(1), label_name_s.unsqueeze(1)
+
+            labels_name = [[label_name[p] for p in l ]for l in label_name_s]
+            labels_prob = [[p for p in l ]for l in label_prob]
+            print('Done:', labels_name)
+
+            for i in range(len(label_prob)):
+                print("\t",labels_name[i][0],"\t",labels_prob[i][0])
+
+            output_name = output_name + labels_name
+            output_prob = output_prob + labels_prob
+            start = end
+            end = end + 160
+            if debug:
+                pdb.set_trace()
+
+        if debug:
+            pdb.set_trace()
         print('\nVisualization...')
-        edge = model_2stream.stgcn.graph.edge
+        edge = model_2stream_basic.stgcn.graph.edge
         images = stgcn_tools.visualization.stgcn_visualize_output(
             pose, edge, self.video, labels_name, labels_prob)
         print('Done.')
@@ -174,7 +188,7 @@ class Demo():
         model_2stream = TwoStreamNN(model_i3d, model_stgcn, num_classes)
         return model_2stream
 
-    def _extractFeature(self, model, pose, i3d_video):
+    def _extractFeature(self, model, pose, i3d_video, cluster):
         pose = pose.cuda()
         i3d_video = i3d_video.cuda()
         model.cuda()
@@ -203,22 +217,28 @@ class Demo():
             j += 4
         new_fi3d = new_fi3d[:,:t_stgcn]
         
+        """
         if self.modality == '2streamNN':
             output = f_stgcn[:,:video_len // 4] + new_fi3d[:,:video_len // 4]
         elif self.modality == 'i3d':
             output = new_fi3d[:,:video_len // 4]
         elif self.modality == 'stgcn':
             output = f_stgcn[:,:video_len // 4]
+        """
 
-        label_prob, label_sequence = output.max(dim=0)
-        label_prob_s, label_name_s = label_prob.unsqueeze(1), label_sequence.unsqueeze(1)
+        if cluster != 'daily_life':
+            output = f_stgcn[:,:video_len // 4] + new_fi3d[:,:video_len // 4]
+        else:
+            output = new_fi3d[:,:video_len // 4]
 
-        return label_prob_s, label_name_s
+        softmax = torch.nn.Softmax(0)
+        return softmax(output)
 
 if __name__ == '__main__':
-    cluster = 'basic'
-    demo_dir_folder = '../Demo/alessio'
-    video_name = 'basic_2.mp4'
+    demo_dir_folder = '../Demo/daily_life'
+    video_name = 'video.avi'
     output_name = '2streamNN.mp4'
     modality = '2streamNN'
-Demo(cluster, demo_dir_folder, video_name, output_name, modality, debug=True, openpose=True)
+    Demo(demo_dir_folder, video_name, output_name, modality)
+
+

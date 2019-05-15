@@ -45,7 +45,7 @@ def stgcn_visualize_output(pose,
                          int(np.ceil(2 * scale_factor)))
 
             if t // 4 < len(label_sequence):
-                if label_sequence_prob[t // 4][m] > 0.4:
+                if label_sequence_prob[t // 4][m] > 0.8:
                     body_label = label_sequence[t // 4][m]
                     cv2.putText(text, body_label, (150,150),
                                 cv2.FONT_HERSHEY_TRIPLEX, 1.,
