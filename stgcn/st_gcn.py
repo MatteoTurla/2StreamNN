@@ -88,6 +88,7 @@ class Model(nn.Module):
        
         # prediction
         x = self.fcn(x)
+
         out_logits = x.view(x.size(0), -1)
         out = self.softmax(out_logits)
         #shape Batch, num classes

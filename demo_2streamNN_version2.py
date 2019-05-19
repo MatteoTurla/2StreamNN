@@ -7,8 +7,8 @@ import math
 import torch
 import skvideo.io
 
-import stgcn.tools.utils as stgcn_tools
 import i3d.tools as i3d_tools
+import tools as tools
 
 import docker
 from pathlib import Path
@@ -17,8 +17,8 @@ from i3d.i3dpt import I3D
 from stgcn.st_gcn import Model
 from TwoStreamNN import TwoStreamNN
 
-#per ora funziona quando c'è solo una persona, video può essere lungo a piacere, non sono presenti classi di rigetto
-#quindi anche se non si fa nulla il sitema darà in otput qualche azione
+#per ora funziona quando c'è solo una persona, video deve poter stare in memoria, non sono presenti classi di rigetto
+#quindi anche se non si fa nulla il sitema darà in output qualche azione
 class Demo():
     def __init__(self, cluster, demo_dir_folder, video_name, output_name, modality, debug=True, openpose=True):
         since = time.time()
@@ -51,7 +51,8 @@ class Demo():
         downsample_stgcn = 1
         model_weight_stgcn = 'stgcn/best_model/{}.pt'.format(cluster)
         model_weight_i3d = 'i3d/best_model/{}.pt'.format(cluster)
-        label_name_path = '../Dataset/label_name.txt'
+        
+        label_name_path = '/home/Dataset/label_name.txt'
         with open(label_name_path) as f:
             label_name = f.readlines()
             label_name = [line.rstrip() for line in label_name]
@@ -65,61 +66,70 @@ class Demo():
         else:
             openpose_folder = os.path.join(self.demo_dir_folder, 'openpose')
         
-        self.video = stgcn_tools.video.get_video_frames(video_path)
+        model_2stream = self._loadingModels(model_weight_stgcn, model_weight_i3d, num_classes)
+
+        self.video = tools.utils.get_video_frames(video_path)
         video_height, video_width, video_channel = self.video[0].shape
         video_len = len(self.video)
 
-        print("generating pose")
-        video_info = stgcn_tools.openpose.json_pack(openpose_folder, frame_width=video_width, frame_height=video_height)
-        pose, _ = stgcn_tools.video.video_info_parsing(video_info, num_person_out=1)
-        pose_tensor = torch.from_numpy(pose).float()
+        pose_info = tools.utils.openpose_parser(openpose_folder)
+        pose_norm = tools.utils.normalize_openpose(pose_info, video_height, video_width)
+        #multiple person non ancora gestito
+        pose_info = pose_info[:,:,:,0].unsqueeze(3)
+        pose_norm = pose_norm[:,:,:,0].unsqueeze(3)
 
-        x_1,y_1, x_2, y_2 = 1, 1, 0, 0
-        pose_x = pose_tensor.view(3, -1)[0]
-        pose_y = pose_tensor.view(3, -1)[1]
-        for x in pose_x:
-            if x != 0 and x < x_1:
-                x_1 = x
-            elif x != 0 and x > x_2:
-                x_2 = x
-        for y in pose_y:
-            if y != 0 and y < y_1:
-                y_1 = y
-            elif y != 0 and y > y_2:
-                y_2 = y   
+        n_person = pose_norm.shape[3]
+        ln = [[] for _ in range(n_person)]
+        lp = [[] for _ in range(n_person)]
         
-        x_1 = math.floor((x_1 + 0.5) * video_width)
-        y_1 = math.floor((y_1 + 0.5) * video_height)
-        x_2 = math.ceil((x_2 + 0.5) * video_width)
-        y_2 = math.ceil((y_2 + 0.5) * video_height)
-        points = (x_1,y_1,x_2,y_2)
+        for p in range(n_person):
+            print('person n:', p)
+            start = 0
+            end = 32
+            label_name_sequence = []
+            label_prob_sequence = []
+            pose_info_p = pose_info[:,:,:,p].unsqueeze(3)
+            pose_norm_p = pose_norm[:,:,:,p].unsqueeze(3)
 
-        pose_tensor = pose_tensor[:,::downsample_stgcn,:,:].unsqueeze(0)
+            while end < video_len:
+                print("generating pose")
+                pose_tensor = pose_norm_p[:,start:end,:,:]
+                print("generating box crop")
+                pose_box = pose_info_p[:,start:end]
+                score = pose_box[2].mean()
+                if score > 0.3:
+                    
+                    pose_box = pose_box[:, pose_box[2]>0.3]
+                    x1 = pose_box[0].min().item() // 1 - 10
+                    y1 = pose_box[1].min().item() // 1 - 10
+                    x2 = pose_box[0].max().item() // 1 + 10
+                    y2 = pose_box[1].max().item() // 1 + 10
+                    box = (x1, y1, x2, y2)
+                    print("generating i3d video")
+                    video_tensor = i3d_tools.utils.transform_video_crop(self.video[start:end], box)
+                    if debug:
+                        i3d_tools.utils.save_transform_crop(self.video[start:end], box, os.path.join(self.demo_dir_folder, 'i3d_vis.mp4'))
 
-        print("\ngenerating i3d video")
-
-        video_tensor = i3d_tools.utils.transform_video_crop(self.video, points)
-        if debug:
-            i3d_tools.utils.save_transform_crop(self.video, points, os.path.join(self.demo_dir_folder, 'i3d_vis.mp4'))
-        video_tensor = video_tensor[:,::downsample_i3d,:,:].unsqueeze(0)
-
-
-        print("Video:", len(self.video))
-        print("Pose:", pose_tensor.shape)
-        print("I3D video:", video_tensor.shape)
-
-        model_2stream = self._loadingModels(model_weight_stgcn, model_weight_i3d, num_classes)
-        print('\nExtracting Features...')
-        label_prob_s, label_name_s = self._extractFeature(model_2stream, pose_tensor, video_tensor)
-
-        labels_name = [[label_name[p+offset] for p in l ]for l in label_name_s]
-        labels_prob = [[p for p in l ]for l in label_prob_s]
-        print('Done.')
+                    pose_tensor = pose_tensor[:,::downsample_stgcn,:,:].unsqueeze(0)
+                    video_tensor = video_tensor[:,::downsample_i3d,:,:].unsqueeze(0)
+                    
+                    print('\nForward...')
+                    output = self._forward(model_2stream, pose_tensor, video_tensor)
+                    prob, label = self.get_label(label_name, offset, output)
+                    label_prob_sequence.append(prob.item())
+                    label_name_sequence.append(label)
+                    print('Done.')
+                
+                start = start + 8
+                end = end + 8   
+            ln[p] = label_name_sequence
+            lp[p] = label_prob_sequence
 
         print('\nVisualization...')
+        
         edge = model_2stream.stgcn.graph.edge
-        images = stgcn_tools.visualization.stgcn_visualize_output(
-            pose, edge, self.video, labels_name, labels_prob)
+        images = tools.utils.visualize_output(
+            pose_norm, edge, self.video, ln, lp)
         print('Done.')
 
         print('\nSaving...')
@@ -132,22 +142,26 @@ class Demo():
 
         time_elapsed = time.time() - since
         print('Demo complete in {:.0f}m {:.0f}s'.format(time_elapsed // 60, time_elapsed % 60))
+
         
     def _openpose(self):
+        #estrae keypoint e li salve nella cartella openpose in demo_dir
+        #return cartella contente file json per ogni frame
         openpose_dir = os.path.join(self.demo_dir_folder, 'openpose')
 
         if os.path.exists(openpose_dir):
             os.system('rm -f {}/*'.format(openpose_dir))
         else:
             os.system('mkdir {}'.format(openpose_dir))
+
         #monto cartella contente video nel container docker
         docker_volume = Path(self.demo_dir_folder).absolute()
         cmd = "./build/examples/openpose/openpose.bin --video ../data/{}  \
-                 --write_keypoint_json  ../data/{} --no_display".format(self.video_name, 'openpose')
+                 --write_keypoint_json  ../data/{} --tracking 0 --number_people_max 3 --no_display".format(self.video_name, 'openpose')
         volumes = {docker_volume: {'bind': '/data', 'mode': 'rw'}}
         client = docker.from_env()
         print("extracting skeletons keypoints")
-        result = client.containers.run("mjsobrep/openpose:latest", cmd, runtime="nvidia", volumes=volumes)
+        result = client.containers.run("gemfield/openpose:latest", cmd, runtime="nvidia", volumes=volumes)
         result = result.decode('UTF-8')
         print(result)
         return openpose_dir
@@ -172,53 +186,34 @@ class Demo():
         model_stgcn.load_state_dict(torch.load(stgcn_w))
 
         model_2stream = TwoStreamNN(model_i3d, model_stgcn, num_classes)
+        model_2stream.cuda()
         return model_2stream
 
-    def _extractFeature(self, model, pose, i3d_video):
+    def _forward(self, model, pose, i3d_video):
         pose = pose.cuda()
         i3d_video = i3d_video.cuda()
-        model.cuda()
         model.eval()
 
-        out_stgcn, out_i3d = model.extract_feature(pose, i3d_video)
-
-        f_stgcn = out_stgcn[0].sum(2).sum(2).cpu()
-        f_i3d = out_i3d[0].sum(2).sum(2).cpu()
-        num_classes = f_i3d.shape[0]
-
-        t_stgcn = f_stgcn.shape[1]
-        t_i3d = f_i3d.shape[1]
-        video_len = len(self.video)
-
-        t_out = (t_i3d + 1) * 4
-        f_i3d = torch.cat((f_i3d, f_i3d[:,-1:]), 1)
- 
-        j = 0
-        new_fi3d = torch.zeros((num_classes, t_out))
-        for i in range(t_i3d):
-            new_fi3d[:,j] = f_i3d[:,i]
-            new_fi3d[:,j+1] = f_i3d[:,i]
-            new_fi3d[:,j+2] = f_i3d[:,i]
-            new_fi3d[:,j+3] = f_i3d[:,i]
-            j += 4
-        new_fi3d = new_fi3d[:,:t_stgcn]
+        with torch.no_grad():
+            output = model.forward_mean(pose, i3d_video)
         
-        if self.modality == '2streamNN':
-            output = f_stgcn[:,:video_len // 4] + new_fi3d[:,:video_len // 4]
-        elif self.modality == 'i3d':
-            output = new_fi3d[:,:video_len // 4]
-        elif self.modality == 'stgcn':
-            output = f_stgcn[:,:video_len // 4]
+        pose.detach().cpu()
+        i3d_video.detach().cpu()
+        output.detach().cpu()
+        return output
 
-        label_prob, label_sequence = output.max(dim=0)
-        label_prob_s, label_name_s = label_prob.unsqueeze(1), label_sequence.unsqueeze(1)
-
-        return label_prob_s, label_name_s
+    def get_label(self, label_name, offset, output):
+        prob, index = output.max(1)
+        return prob, label_name[index+offset]
 
 if __name__ == '__main__':
     cluster = 'basic'
-    demo_dir_folder = '../Demo/alessio'
-    video_name = 'basic_2.mp4'
+    demo_dir_folder = '../Demo/2_person'
+    video_name = 'video.avi'
     output_name = '2streamNN.mp4'
     modality = '2streamNN'
-Demo(cluster, demo_dir_folder, video_name, output_name, modality, debug=True, openpose=True)
+    Demo(cluster, demo_dir_folder, video_name, output_name, modality, debug=True, openpose=True)
+
+
+
+

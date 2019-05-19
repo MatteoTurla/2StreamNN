@@ -1,5 +1,6 @@
 import torch
 from torch.utils import data
+import pdb
 
 import numpy as np
 import os
@@ -131,11 +132,12 @@ class Dataset(data.Dataset):
 
 
 if __name__ == '__main__':
-    dataset = Dataset('../Dataset/aggregorio_skeletons_numpy/basic/test', 
-                        '../Dataset/aggregorio_videos_pytorch/basic/test',
-                        n_frames=16, downsample_pose=1, downsample_video=2)
-
+    dataset = Dataset('../Dataset/aggregorio_balanced/aggregorio_skeletons_numpy/basic/{}'.format('train'), 
+                        '../Dataset/aggregorio_balanced/aggregorio_videos_pytorch/basic/{}'.format('train'),
+                        n_frames=32, downsample_pose = 1, downsample_video = 2)
     dataset.print()
+
+    pdb.set_trace()
 
     loader = data.DataLoader(dataset, batch_size=32, num_workers=8, pin_memory=True)
     for poses, videos, labels in loader:

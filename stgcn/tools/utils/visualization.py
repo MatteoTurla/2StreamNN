@@ -1,5 +1,7 @@
 import cv2
 import numpy as np
+import torch
+import pdb
 
 def stgcn_visualize_output(pose,
                     edge,
@@ -8,6 +10,8 @@ def stgcn_visualize_output(pose,
                     label_sequence_prob,
                     height=1080):
 
+    pdb.set_trace()
+    pose = pose.numpy()
     _, T, V, M = pose.shape
     T = len(video)
     for t in range(T):
@@ -37,17 +41,18 @@ def stgcn_visualize_output(pose,
                 if xi + yi == 0 or xj + yj == 0:
                     continue
                 else:
-                    xi = int((xi + 0.5) * W)
-                    yi = int((yi + 0.5) * H)
-                    xj = int((xj + 0.5) * W)
-                    yj = int((yj + 0.5) * H)
+                    xi = int((xi + 0.5) * H)
+                    yi = int((yi + 0.5) * W)
+                    xj = int((xj + 0.5) * H)
+                    yj = int((yj + 0.5) * W)
                 cv2.line(skeleton, (xi, yi), (xj, yj), (255, 255, 255),
                          int(np.ceil(2 * scale_factor)))
 
-            if t // 4 < len(label_sequence):
-                if label_sequence_prob[t // 4][m] > 0.8:
-                    body_label = label_sequence[t // 4][m]
-                    cv2.putText(text, body_label, (150,150),
+            if t // 8 < len(label_sequence):
+                if label_sequence_prob[t // 8][m] > 0.8:
+                    body_label = label_sequence[t // 8][m]
+                    print(body_label)
+                    cv2.putText(text, body_label, (50,50),
                                 cv2.FONT_HERSHEY_TRIPLEX, 1.,
                                 (255, 255, 255))
         

@@ -76,7 +76,3 @@ def save_transform_nocrop(video, path):
     for img in video_out:
         writer.writeFrame(img)
     writer.close()
-
-def get_video_header(video_path):
-    header = skvideo.io.ffprobe(video_path)
-    return header

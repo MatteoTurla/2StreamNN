@@ -7,18 +7,15 @@ class TwoStreamNN(torch.nn.Module):
         self.I3D = model_i3d
         self.stgcn = model_stgcn
 
-        self.fc1 = torch.nn.Linear(1024+256, 512)
-        self.fc2 = torch.nn.Linear(512, num_classes)
+        #self.fc1 = torch.nn.Linear(1024+256, 512)
+        #self.fc2 = torch.nn.Linear(512, num_classes)
         self.softmax = torch.nn.Softmax(1)
-        self.f_softmax = torch.nn.Softmax(0)
 
     def forward(self, X_stgcn, X_i3d):
-        out_stgcn = self.stgcn(X_stgcn).squeeze(3).squeeze(2)
-        out_i3d = self.I3D(X_i3d).squeeze(4).squeeze(3).squeeze(2)
-        out = torch.cat((out_stgcn, out_i3d), dim=1)
-        out = F.relu(self.fc1(out))
-        out = F.relu(self.fc2(out))
-        out = self.softmax(out)
+        out_stgcn, logits_stgcn = self.stgcn(X_stgcn)
+        out_i3d, logits_i3d = self.I3D(X_i3d)
+        out = logits_stgcn + logits_i3d
+        #entropy loss do LogSoftmax function when calc loss
         return out
 
     def forward_mean(self, X_stgcn, X_i3d): 
