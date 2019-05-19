@@ -13,6 +13,7 @@ resize =torchvision.transforms.Resize(224)
 
 def padding(image):
     w, h = image.size
+    delta_w, delta_h = 0, 0
     if w > h:
         delta_w = 0
         delta_h = w - h

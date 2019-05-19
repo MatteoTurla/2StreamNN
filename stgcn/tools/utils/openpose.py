@@ -13,7 +13,7 @@ def json_pack(snippets_dir, frame_width=1, frame_height=1, label='unknown', labe
         for person in data['people']:
             score, coordinates = [], []
             skeleton = {}
-            keypoints = person['pose_keypoints']
+            keypoints = person['pose_keypoints_2d']
             for i in range(0, len(keypoints), 3):
                 coordinates += [keypoints[i]/frame_width, keypoints[i + 1]/frame_height]
                 score += [keypoints[i + 2]]
