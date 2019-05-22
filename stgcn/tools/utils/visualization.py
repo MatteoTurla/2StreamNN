@@ -3,67 +3,6 @@ import numpy as np
 import torch
 import pdb
 
-def stgcn_visualize_output(pose,
-                    edge,
-                    video,
-                    label_sequence,
-                    label_sequence_prob,
-                    height=1080):
-
-    pdb.set_trace()
-    pose = pose.numpy()
-    _, T, V, M = pose.shape
-    T = len(video)
-    for t in range(T):
-        if t >= pose.shape[1]:
-            continue
-
-        frame = video[t]
-
-        # image resize
-        H, W, c = frame.shape
-        H, W, c = frame.shape
-        scale_factor = 2 * height / 1080
-
-        # draw skeleton
-        skeleton = frame * 0
-        text = frame * 0
-        for m in range(M):
-            score = pose[2, t, :, m].mean()
-            if score < 0.3:
-                continue
-
-            for i, j in edge:
-                xi = pose[0, t, i, m]
-                yi = pose[1, t, i, m]
-                xj = pose[0, t, j, m]
-                yj = pose[1, t, j, m]
-                if xi + yi == 0 or xj + yj == 0:
-                    continue
-                else:
-                    xi = int((xi + 0.5) * H)
-                    yi = int((yi + 0.5) * W)
-                    xj = int((xj + 0.5) * H)
-                    yj = int((yj + 0.5) * W)
-                cv2.line(skeleton, (xi, yi), (xj, yj), (255, 255, 255),
-                         int(np.ceil(2 * scale_factor)))
-
-            if t // 8 < len(label_sequence):
-                if label_sequence_prob[t // 8][m] > 0.8:
-                    body_label = label_sequence[t // 8][m]
-                    print(body_label)
-                    cv2.putText(text, body_label, (50,50),
-                                cv2.FONT_HERSHEY_TRIPLEX, 1.,
-                                (255, 255, 255))
-        
-        rgb_result = frame.astype(float) * 0.5
-        rgb_result += skeleton.astype(float) * 0.25
-        rgb_result += text.astype(float)
-        rgb_result[rgb_result > 255] = 255
-        rgb_result.astype(np.uint8)
-
-        yield rgb_result
-
 def stgcn_visualize(pose,
                     edge,
                     feature,

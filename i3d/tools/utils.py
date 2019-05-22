@@ -23,11 +23,31 @@ def padding(image):
     padding = (delta_w//2, delta_h//2, delta_w-(delta_w//2), delta_h-(delta_h//2))
     return ImageOps.expand(image, padding)
 
+def padding_box(box):
+    w = box[2] - box[0]
+    h = box[3] - box[1]
+    delta_w, delta_h = 0, 0
+    if w > h:
+        delta_w = 0
+        delta_h = w - h
+    elif w < h:
+        delta_w = h - w
+        delta_h = 0 
+    
+#    else:
+ #       print('Video is a square!!')
+    box[0] = box[0] - delta_w//2
+    box[1] = box[1] - delta_h//2
+    box[2] = box[2] + (delta_w-(delta_w//2))
+    box[3] = box[3] + (delta_h-(delta_h//2))
+    return box    
+
 def transform_video_crop(video, points):
     video_torch = []
     for i in range(len(video)):
         frame = video[i]
         frame = toPILImage(frame)
+        points = padding_box(points)
         frame = frame.crop(points)
         frame = padding(frame)
         frame = transforms(frame)

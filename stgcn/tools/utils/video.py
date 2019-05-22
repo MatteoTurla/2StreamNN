@@ -29,12 +29,4 @@ def video_info_parsing(video_info, num_person_in=5, num_person_out=2):
     label = video_info['label_index']
     return data_numpy, label
 
-def get_video_frames(video_path):
-    vread = skvideo.io.vread(video_path)
-    video = []
-    for frame in vread:
-        video.append(frame)
-    #heigth, width, channel
-    return video
-
 

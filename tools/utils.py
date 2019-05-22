@@ -20,6 +20,7 @@ def visualize_output(pose,
                     video,
                     label_sequence,
                     label_sequence_prob,
+                    minscore=0.8,
                     height=1080):
 
     _, T, V, M = pose.shape

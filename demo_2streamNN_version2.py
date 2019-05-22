@@ -74,15 +74,19 @@ class Demo():
 
         pose_pack = stgcn_tools.openpose.json_pack(openpose_folder, video_width, video_height)
         pose, _ = stgcn_tools.video.video_info_parsing(pose_pack, num_person_out=1)
-        
+        pose = torch.from_numpy(pose).float()
+
         ln = []
         lp = []
         
-
+        first = True
         start = 0
-        end = 32
+        center = 0
+        end = 64
         label_name_sequence = []
         label_prob_sequence = []
+        label_name_sequence.append('')
+        label_prob_sequence.append(0)
 
         while end < video_len:
             print("generating pose")
@@ -90,23 +94,24 @@ class Demo():
             print("generating box crop")
             pose_box = pose_tensor[:, pose_tensor[2]>0]
             if pose_box.shape[1]>0:
-                x1 = (pose_box[0].min() + 0.5) * video_width // 1
-                y1 = (pose_box[1].min() + 0.5) * video_height // 1
-                x2 = (pose_box[0].max() + 0.5) * video_width // 1
-                y2 = (pose_box[1].max() + 0.5) * video_height // 1
-                box = (x1, y1, x2, y2)
+                x1 = (pose_box[0].min().item() + 0.5) * video_width 
+                y1 = (pose_box[1].min().item() + 0.5) * video_height 
+                x2 = (pose_box[0].max().item() + 0.5) * video_width 
+                y2 = (pose_box[1].max().item() + 0.5) * video_height
+                box = [x1, y1, x2, y2]
                 print("generating i3d video")
                 video_tensor = i3d_tools.utils.transform_video_crop(self.video[start:end], box)
                 if debug:
                     i3d_tools.utils.save_transform_crop(self.video[start:end], box, os.path.join(self.demo_dir_folder, 'i3d_vis.mp4'))
 
-                pose_tensor = torch.from_numpy(pose_tensor).float()
-                pose_tensor = pose_tensor[:,::downsample_stgcn,:,:].unsqueeze(0)
-                video_tensor = video_tensor[:,::downsample_i3d,:,:].unsqueeze(0)
                 
+                pose_tensor = pose_tensor[:,:32:downsample_stgcn,:,:].unsqueeze(0)
+                video_tensor = video_tensor[:,::downsample_i3d,:,:].unsqueeze(0)
+
                 print('\nForward...')
                 output = self._forward(model_2stream, pose_tensor, video_tensor)
                 prob, label = self.get_label(label_name, offset, output)
+                print(prob, label)
                 label_prob_sequence.append(prob.item())
                 label_name_sequence.append(label)
                 print('Done.')
@@ -114,15 +119,16 @@ class Demo():
                 label_prob_sequence.append(0)
                 label_name_sequence.append('')
             start = start + 8
-            end = end + 8   
+            end = end + 8
+
         ln.append(label_name_sequence)
         lp.append(label_prob_sequence)
 
         print('\nVisualization...')
-        
+        pose = pose.numpy()
         edge = model_2stream.stgcn.graph.edge
         images = tools.utils.visualize_output(
-            pose, edge, self.video, ln, lp)
+            pose, edge, self.video, ln, lp, minscore=0.7)
         print('Done.')
 
         print('\nSaving...')
@@ -188,8 +194,13 @@ class Demo():
         model.eval()
 
         with torch.no_grad():
-            output = model.forward_mean(pose, i3d_video)
-        
+            if self.modality == '2streamNN':
+                output = model.forward_mean(pose, i3d_video)
+            elif self.modality == 'i3d':
+                output, _ = model.I3D(i3d_video)
+            else:
+                output, _ = model.stgcn(pose)
+
         pose.detach().cpu()
         i3d_video.detach().cpu()
         output.detach().cpu()
